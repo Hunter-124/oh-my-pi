@@ -568,6 +568,8 @@ export class Editor implements Component, Focusable {
 	/** States undone off {@link #undoStack}, replayable until the next fresh edit. */
 	#redoStack: EditorState[] = [];
 	#suspendUndo = false;
+	/** Most recent pre-edit snapshot, finalized once buffer mutation is observable. */
+	#pendingUndoState: EditorState | undefined;
 
 	// Debounce timer for autocomplete updates
 	#autocompleteTimeout?: NodeJS.Timeout;
@@ -789,6 +791,7 @@ export class Editor implements Component, Focusable {
 	#setTextInternal(text: string, cursorAnchor: HistoryCursorAnchor = "end"): void {
 		this.#undoStack.length = 0;
 		this.#redoStack.length = 0;
+		this.#pendingUndoState = undefined;
 		const lines = sanitizeLoadedText(text).split("\n");
 		this.#state.lines = lines.length === 0 ? [""] : lines;
 		if (cursorAnchor === "start") {
@@ -1956,6 +1959,8 @@ export class Editor implements Component, Focusable {
 	 * Used for command-like autocomplete actions whose typed trigger should not count as the edit being undone.
 	 */
 	undoPastTransientText(transientText: string): void {
+		this.clearVolatileText();
+		this.#commitRecordedUndoState();
 		if (transientText.length === 0) {
 			this.#applyUndo();
 			return;
@@ -2405,6 +2410,7 @@ export class Editor implements Component, Focusable {
 		this.#scrollOffset = 0;
 		this.#undoStack.length = 0;
 		this.#redoStack.length = 0;
+		this.#pendingUndoState = undefined;
 
 		if (this.onChange) this.onChange("");
 		if (this.onSubmit) this.onSubmit(result);
@@ -2670,15 +2676,39 @@ export class Editor implements Component, Focusable {
 
 	#recordUndoState(): void {
 		if (this.#suspendUndo) return;
-		this.#undoStack.push(structuredClone(this.#state));
+		this.#commitRecordedUndoState();
+		const snapshot = structuredClone(this.#state);
+		this.#undoStack.push(snapshot);
+		this.#pendingUndoState = snapshot;
 		if (this.#undoStack.length > MAX_UNDO_STACK) {
 			this.#undoStack.shift();
 		}
-		// A fresh edit forks history: whatever was undone is no longer reachable forward.
-		this.#redoStack.length = 0;
+	}
+
+	/** Finalize the preceding undo candidate after its command has run. No-op
+	 *  commands drop their duplicate snapshot and, crucially, preserve redo. */
+	#commitRecordedUndoState(): void {
+		const snapshot = this.#pendingUndoState;
+		if (!snapshot) return;
+		this.#pendingUndoState = undefined;
+
+		let changed = snapshot.lines.length !== this.#state.lines.length;
+		for (let i = 0; !changed && i < snapshot.lines.length; i++) {
+			changed = snapshot.lines[i] !== this.#state.lines[i];
+		}
+
+		if (changed) {
+			// A fresh edit forks history: whatever was undone is no longer reachable forward.
+			this.#redoStack.length = 0;
+		} else if (this.#undoStack.at(-1) === snapshot) {
+			this.#undoStack.pop();
+		}
 	}
 
 	#applyUndo(): void {
+		// A volatile STT preview is not a committed edit and must never enter history snapshots.
+		this.clearVolatileText();
+		this.#commitRecordedUndoState();
 		const snapshot = this.#undoStack.pop();
 		if (!snapshot) return;
 		this.#pushBounded(this.#redoStack);
@@ -2686,6 +2716,9 @@ export class Editor implements Component, Focusable {
 	}
 
 	#applyRedo(): void {
+		// Keep redo symmetric with undo if a new volatile preview arrived after an undo.
+		this.clearVolatileText();
+		this.#commitRecordedUndoState();
 		const snapshot = this.#redoStack.pop();
 		if (!snapshot) return;
 		this.#pushBounded(this.#undoStack);

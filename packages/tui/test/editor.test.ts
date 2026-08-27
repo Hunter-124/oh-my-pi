@@ -2813,6 +2813,42 @@ describe("Editor component", () => {
 			editor.handleInput("\x1b[19~"); // F8
 			expect(editor.getText()).toBe("a");
 		});
+
+		for (const [name, sequence] of [
+			["Alt+-", "\x1b-"],
+			["Alt+_", "\x1b_"],
+		] as const) {
+			it(`recognizes raw legacy ${name} as redo`, () => {
+				const editor = new Editor(defaultEditorTheme);
+				editor.handleInput("a");
+				editor.handleInput(UNDO);
+				expect(editor.getText()).toBe("");
+
+				editor.handleInput(sequence);
+				expect(editor.getText()).toBe("a");
+			});
+		}
+
+		for (const [name, sequence] of [
+			["backspace at column zero", "\x7f"],
+			["forward delete at the end of the buffer", "\x1b[3~"],
+			["backward word delete at the start of the buffer", "\x17"],
+			["forward word delete at the end of the buffer", "\x1bd"],
+			["line-start kill at the start of the buffer", "\x15"],
+			["line-end kill at the end of the buffer", "\x0b"],
+		] as const) {
+			it(`preserves redo after no-op ${name}`, () => {
+				const editor = new Editor(defaultEditorTheme);
+				editor.handleInput("a");
+				editor.handleInput(UNDO);
+				expect(editor.getText()).toBe("");
+
+				editor.handleInput(sequence);
+				expect(editor.getText()).toBe("");
+				editor.handleInput(REDO);
+				expect(editor.getText()).toBe("a");
+			});
+		}
 	});
 
 	describe("decorateText around the cursor seam", () => {
@@ -2920,6 +2956,19 @@ describe("Editor component", () => {
 			expect(editor.getText()).toBe("line one\nline two");
 			editor.setVolatileText("single line");
 			expect(editor.getText()).toBe("single line");
+		});
+
+		it("discards an active preview before undo so redo cannot make it permanent", () => {
+			const editor = new Editor(defaultEditorTheme);
+			editor.handleInput("a");
+			editor.setVolatileText("draft");
+			expect(editor.getText()).toBe("adraft");
+
+			editor.handleInput("\x1b[45;5u"); // undo
+			expect(editor.getText()).toBe("");
+			editor.clearVolatileText();
+			editor.handleInput("\x1b[45;3u"); // redo
+			expect(editor.getText()).toBe("a");
 		});
 	});
 
