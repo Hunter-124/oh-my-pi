@@ -587,6 +587,13 @@ When the active chat model keeps failing (429s, quota walls, provider outages) a
 
 A prefixed wildcard such as `openrouter/google/*` can be used as a chain key or entry: it matches ids under that prefix or prepends the prefix to the failing model's bare id when changing providers. Bare fallback entries inherit the failing turn's thinking level; an explicit suffix can replace it. When a chain is exhausted, recovery can consult the current fallback model's own chain as well, and each hop still consumes a retry attempt. See [Retry policy](./non-compaction-retry-policy.md) for recovery ordering and quota behavior.
 
+**Auto-Promote Context is not the retry fallback toggle.** Setting
+`contextPromotion.enabled: false` only disables larger-context promotion; set
+`retry.modelFallback: false` to stop configured retry fallback chains from
+switching the active model after provider errors. Same-model retries and
+compaction remain available. See [Context promotion](./models.md#context-promotion)
+for the combined configuration and the boundary with intrinsic provider routing.
+
 ### Tools and approvals
 
 ```yaml

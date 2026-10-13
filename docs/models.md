@@ -736,10 +736,30 @@ The table's `images` column reports what the transport will actually send, so a 
 stripped (`compat.stripImageInput`, see [Image handling](#compatibility-and-routing-fields)) shows `no`
 even when its spec declares `input: [text, image]`; `--json` keeps the declared `input`.
 
-## Context promotion (model-level fallback chains)
+## Context promotion
 
 Context promotion switches to an explicitly configured larger-context model before compaction.
 It is attempted on context overflow errors and at pre-prompt or post-turn compaction thresholds.
+
+Context promotion and [retry model fallback](./non-compaction-retry-policy.md) are
+independent. Turning off **Auto-Promote Context** (`contextPromotion.enabled`)
+does not disable `retry.fallbackChains`: provider errors can still switch the
+active model when `retry.modelFallback` is enabled, even if the fallback model
+happens to have a larger context window. The TUI labels those switches `Fallback`.
+
+To disable both context promotion and configured retry model-fallback switches:
+
+```yaml
+contextPromotion:
+  enabled: false
+retry:
+  modelFallback: false
+```
+
+This leaves same-model retries (`retry.enabled`) and automatic compaction
+(`compaction.enabled`) unchanged. Provider errors that require a model switch
+surface instead of walking the configured fallback chain. Intrinsic provider
+routing, such as Fireworks Fast-to-Standard degradation, remains separate.
 
 ### Trigger and order
 
